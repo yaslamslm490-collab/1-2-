@@ -1,0 +1,8 @@
+{
+  "name": "نظام تشغيل الوسائط الرقمية | AI Media OS",
+  "description": "نظام تشغيل الوسائط الرقمية الذكي لإدارة الشخصيات الافتراضية والسكريبتات وسير العمل الإعلامي",
+  "permissions": [],
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
