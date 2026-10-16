@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { type FormEvent, useState, useEffect, useRef } from 'react';
 import { useApp } from '@/context/AppContext';
 import {
   speakArabic,
@@ -33,26 +33,100 @@ export function AssistantView({ onNavigate }: { onNavigate?: (key: string) => vo
   const { currentUser } = useApp();
 
   const [inputPrompt, setInputPrompt] = useState('');
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: 'm1',
-      sender: 'assistant',
-      text: `أهلاً بك يا ${currentUser.name} في المساعد الشخصي NADA AI. أرسل سؤالك وسأحاول الوصول إلى خادم Gemini عبر اتصال آمن.`,
-      timestamp: 'الآن',
-    },
-  ]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
 
   const [isListening, setIsListening] = useState(false);
   const [isSending, setIsSending] = useState(false);
-  const [connectionStatus, setConnectionStatus] = useState('لم يُختبر اتصال الخادم بعد');
+  const [connectionStatus, setConnectionStatus] = useState('جارٍ فحص الخادم…');
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [speechError, setSpeechError] = useState<string | null>(null);
+  const [authStatus, setAuthStatus] = useState<'checking' | 'signed-out' | 'authenticated' | 'unconfigured' | 'error'>('checking');
+  const [ownerToken, setOwnerToken] = useState('');
+  const [authError, setAuthError] = useState('');
+  const [isAuthenticating, setIsAuthenticating] = useState(false);
+  const [geminiConfigured, setGeminiConfigured] = useState(false);
   const recognizerRef = useRef<ReturnType<typeof createArabicSpeechRecognizer> | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  useEffect(() => {
+    let active = true;
+    const checkServer = async () => {
+      try {
+        const [healthResponse, sessionResponse] = await Promise.all([
+          fetch('/api/health', { credentials: 'include' }),
+          fetch('/api/auth/session', { credentials: 'include' }),
+        ]);
+        const [health, session] = await Promise.all([healthResponse.json(), sessionResponse.json()]);
+        if (!active) return;
+        if (!healthResponse.ok || !sessionResponse.ok) throw new Error('تعذّر فحص حالة الخادم.');
+        const hasGemini = Boolean(health.geminiConfigured);
+        setGeminiConfigured(hasGemini);
+        if (!session.configured) {
+          setAuthStatus('unconfigured');
+          setConnectionStatus('مصادقة المالك غير مهيأة');
+        } else if (session.authenticated) {
+          setAuthStatus('authenticated');
+          setConnectionStatus(hasGemini ? 'الجلسة جاهزة • Gemini لم يُختبر بعد' : 'Gemini غير مهيأ');
+        } else {
+          setAuthStatus('signed-out');
+          setConnectionStatus(hasGemini ? 'الخادم متاح • يلزم تسجيل دخول المالك' : 'Gemini غير مهيأ');
+        }
+      } catch {
+        if (!active) return;
+        setAuthStatus('error');
+        setConnectionStatus('فشل فحص اتصال الخادم');
+      }
+    };
+    void checkServer();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!ownerToken.trim() || isAuthenticating) return;
+    setIsAuthenticating(true);
+    setAuthError('');
+    try {
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ token: ownerToken }),
+      });
+      const result = await response.json();
+      if (!response.ok || result.authenticated !== true) {
+        throw new Error(result.message || `تعذّر تسجيل الدخول (HTTP ${response.status}).`);
+      }
+      setOwnerToken('');
+      setAuthStatus('authenticated');
+      setConnectionStatus(geminiConfigured ? 'جلسة المالك جاهزة • Gemini لم يُختبر بعد' : 'جلسة المالك جاهزة • Gemini غير مهيأ');
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : 'تعذّر تسجيل الدخول.');
+    } finally {
+      setIsAuthenticating(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        credentials: 'include',
+      });
+    } catch {
+      // Clear the client-side state even if the logout request cannot reach the server.
+    } finally {
+      setMessages([]);
+      setAuthStatus('signed-out');
+      setConnectionStatus('تم تسجيل الخروج');
+    }
+  };
 
   // Voice Input (STT) setup
   const toggleListening = () => {
@@ -110,7 +184,7 @@ export function AssistantView({ onNavigate }: { onNavigate?: (key: string) => vo
 
   const handleSendPrompt = async (promptText?: string) => {
     const textToSend = (promptText || inputPrompt).trim();
-    if (!textToSend || isSending) return;
+    if (!textToSend || isSending || authStatus !== 'authenticated') return;
     setIsSending(true);
 
     const userMsg: ChatMessage = {
@@ -138,6 +212,7 @@ export function AssistantView({ onNavigate }: { onNavigate?: (key: string) => vo
       });
       const result = await response.json();
       if (!response.ok || typeof result.response !== 'string') {
+        if (response.status === 401) setAuthStatus('signed-out');
         throw new Error(result.message || result.error?.message || `تعذّر تنفيذ الطلب (HTTP ${response.status}).`);
       }
       setConnectionStatus(`اتصال ناجح • ${result.model || 'Gemini'}`);
@@ -185,6 +260,14 @@ export function AssistantView({ onNavigate }: { onNavigate?: (key: string) => vo
         </div>
 
         <div className="flex items-center gap-2">
+          {authStatus === 'authenticated' && (
+            <button
+              onClick={() => void handleLogout()}
+              className="px-3 py-1.5 rounded-lg bg-elevated hover:bg-elevated/80 border border-default text-xs font-medium text-secondary transition-colors"
+            >
+              تسجيل الخروج
+            </button>
+          )}
           {isSpeaking && (
             <button
               onClick={() => {
@@ -215,8 +298,53 @@ export function AssistantView({ onNavigate }: { onNavigate?: (key: string) => vo
         </div>
       )}
 
+      {authStatus !== 'authenticated' && (
+        <div className="card p-6 space-y-4" aria-live="polite">
+          {authStatus === 'checking' && <p className="text-sm text-secondary">جارٍ التحقق من Worker وD1 والجلسة…</p>}
+          {authStatus === 'unconfigured' && (
+            <div className="space-y-2">
+              <h3 className="font-bold text-primary">مصادقة المالك غير مهيأة</h3>
+              <p className="text-sm text-secondary">أضف OWNER_MASTER_PASSWORD أو OWNER_API_TOKEN إلى أسرار Worker؛ لا تضعه في الواجهة أو GitHub.</p>
+            </div>
+          )}
+          {authStatus === 'error' && (
+            <div className="space-y-3">
+              <p className="text-sm text-error">تعذّر الوصول إلى Worker أو D1. لم تُرسل أي رسالة إلى Gemini.</p>
+              <button onClick={() => window.location.reload()} className="px-3 py-2 rounded-lg bg-elevated border border-default text-sm text-secondary">إعادة فحص الاتصال</button>
+            </div>
+          )}
+          {authStatus === 'signed-out' && (
+            <form onSubmit={(event) => void handleLogin(event)} className="space-y-3 max-w-md">
+              <div>
+                <h3 className="font-bold text-primary">تسجيل دخول المالك</h3>
+                <p className="text-xs text-muted mt-1">رمز المالك يُرسل إلى الخادم الآمن ولا يُحفظ في المتصفح.</p>
+              </div>
+              <input
+                type="password"
+                value={ownerToken}
+                onChange={(event) => setOwnerToken(event.target.value)}
+                autoComplete="current-password"
+                placeholder="رمز دخول المالك"
+                className="w-full rounded-xl bg-elevated border border-default px-4 py-3 text-sm text-primary outline-none focus:border-accent"
+                aria-label="رمز دخول المالك"
+              />
+              {authError && <p role="alert" className="text-sm text-error">{authError}</p>}
+              <button type="submit" disabled={!ownerToken.trim() || isAuthenticating} className="px-4 py-2.5 rounded-lg bg-accent text-white text-sm font-bold disabled:opacity-40">
+                {isAuthenticating ? 'جارٍ التحقق…' : 'دخول آمن'}
+              </button>
+            </form>
+          )}
+        </div>
+      )}
+
       {/* Chat Messages Log */}
-      <div className="card p-4 sm:p-6 min-h-[420px] max-h-[560px] overflow-y-auto space-y-4">
+      <div className={`card p-4 sm:p-6 min-h-[420px] max-h-[560px] overflow-y-auto space-y-4 ${authStatus !== 'authenticated' ? 'hidden' : ''}`}>
+        {messages.length === 0 && (
+          <div className="min-h-[360px] flex flex-col items-center justify-center text-center text-muted gap-3">
+            <Bot className="w-10 h-10 text-accent" />
+            <p className="text-sm">ابدأ محادثة جديدة؛ سيظهر الرد بعد استلام إجابة حقيقية من Gemini.</p>
+          </div>
+        )}
         {messages.map((msg) => (
           <div
             key={msg.id}
@@ -295,7 +423,7 @@ export function AssistantView({ onNavigate }: { onNavigate?: (key: string) => vo
       </div>
 
       {/* Suggested Quick Prompts */}
-      <div className="flex flex-wrap gap-2 pt-1">
+      <div className={`flex flex-wrap gap-2 pt-1 ${authStatus !== 'authenticated' ? 'hidden' : ''}`}>
         {[
           'ما هي حالة المشروعات الحالية؟',
           'استرجع قرارات المالك المسجلة',
@@ -319,7 +447,7 @@ export function AssistantView({ onNavigate }: { onNavigate?: (key: string) => vo
           e.preventDefault();
           handleSendPrompt();
         }}
-        className="card p-3 flex items-center gap-2"
+        className={`card p-3 flex items-center gap-2 ${authStatus !== 'authenticated' ? 'hidden' : ''}`}
       >
         <button
           type="button"

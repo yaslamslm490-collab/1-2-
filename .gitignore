@@ -21,3 +21,6 @@ dist-ssr
 *.sln
 *.sw?
 .env
+.wrangler/
+.dev.vars
+.dev.vars.*
