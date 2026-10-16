@@ -30,19 +30,21 @@ interface ChatMessage {
 }
 
 export function AssistantView({ onNavigate }: { onNavigate?: (key: string) => void }) {
-  const { queryInstantMemory, currentUser, projects, approvals } = useApp();
+  const { currentUser } = useApp();
 
   const [inputPrompt, setInputPrompt] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: 'm1',
       sender: 'assistant',
-      text: `أهلاً بك يا ${currentUser.name} في المساعد الشخصي الموحد NADA AI. أنا متصل بالذاكرة الدائمة للمنظومة (المكونات الـ 12)، وأستطيع استرجاع سياق المشروعات، الشخصيات الـ 11، والموافقات المعلقة في أقل من ثانيتين. كيف أخدمك اليوم؟`,
+      text: `أهلاً بك يا ${currentUser.name} في المساعد الشخصي NADA AI. أرسل سؤالك وسأحاول الوصول إلى خادم Gemini عبر اتصال آمن.`,
       timestamp: 'الآن',
     },
   ]);
 
   const [isListening, setIsListening] = useState(false);
+  const [isSending, setIsSending] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState('لم يُختبر اتصال الخادم بعد');
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [speechError, setSpeechError] = useState<string | null>(null);
   const recognizerRef = useRef<ReturnType<typeof createArabicSpeechRecognizer> | null>(null);
@@ -62,19 +64,7 @@ export function AssistantView({ onNavigate }: { onNavigate?: (key: string) => vo
 
     setSpeechError(null);
     if (!isSpeechRecognitionSupported()) {
-      // Simulate voice input for environments where mic access is blocked
-      setIsListening(true);
-      setTimeout(() => {
-        const samplePhrases = [
-          'ما هي حالة المشروعات الحالية؟',
-          'استرجع قرارات المالك المسجلة',
-          'اقترح فكرة سكريبت لعم حسن عن صيانة المحابس',
-          'أعطني ملخص تسليم واستئناف فوري',
-        ];
-        const phrase = samplePhrases[Math.floor(Math.random() * samplePhrases.length)];
-        setInputPrompt(phrase);
-        setIsListening(false);
-      }, 1500);
+      setSpeechError('التعرف الصوتي غير متاح في هذا المتصفح. يمكنك كتابة رسالتك بدلًا منه.');
       return;
     }
 
@@ -118,9 +108,10 @@ export function AssistantView({ onNavigate }: { onNavigate?: (key: string) => vo
     });
   };
 
-  const handleSendPrompt = (promptText?: string) => {
+  const handleSendPrompt = async (promptText?: string) => {
     const textToSend = (promptText || inputPrompt).trim();
-    if (!textToSend) return;
+    if (!textToSend || isSending) return;
+    setIsSending(true);
 
     const userMsg: ChatMessage = {
       id: 'usr-' + Date.now(),
@@ -131,39 +122,45 @@ export function AssistantView({ onNavigate }: { onNavigate?: (key: string) => vo
 
     setMessages((prev) => [...prev, userMsg]);
     setInputPrompt('');
+    setConnectionStatus('جارٍ الاتصال بالخادم…');
 
-    // Query permanent memory instant reader
-    const memResult = queryInstantMemory(textToSend);
-
-    // Formulate authoritative assistant answer
-    setTimeout(() => {
-      let replyText = '';
-      const lower = textToSend.toLowerCase();
-
-      if (lower.includes('مشروع') || lower.includes('مشروعات')) {
-        replyText = `حالة المشروعات: لدينا حالياً ${projects.length} مشاريع نشطة. أبرزها مشروع "دليل البيت الآمن" بنسبة إنجاز 75%، ومشروع "سلسلة ليان" بنسبة 95% وهو بانتظار الاعتماد النهائي. إجمالي الميزانية المرصودة $63,000.`;
-      } else if (lower.includes('شخصي') || lower.includes('شخصيات') || lower.includes('حسن') || lower.includes('ليان')) {
-        replyText = `كتالوج الشخصيات يضم 11 شخصية رسمية معتمدة من CHAR-001 (ليان) إلى CHAR-011 (خبير الطعام والمزاج). كل شخصية تمتلك Character Bible كامل وقواعد استمرارية DO/DON'T وبصمة صوتية فريدة.`;
-      } else if (lower.includes('موافق') || lower.includes('قرار')) {
-        const pending = approvals.filter((a) => a.status === 'pending');
-        replyText = `سجل القرارات والموافقات: هناك ${pending.length} طلبات معلقة بانتظار قرار المالك (OWNER). أهمها اعتماد خطة النشر الأسبوعية وسكريبت ليان الجديد.`;
-      } else if (lower.includes('ملخص') || lower.includes('استئناف') || lower.includes('تسليم')) {
-        replyText = `ملخص الاستئناف الفوري (Instant Handoff): المنظومة تعمل بكامل كفاءتها على الإصدار 3.0 الموحد. تم إصلاح أزرار التحكم والربط الصوتي، والذاكرة الدائمة مفهرسة. الخطوة التالية المقترحة: اعتماد خطة النشر الأسبوعية وتجربة استوديو الصوت.`;
-      } else {
-        replyText = `بناءً على الذاكرة الدائمة للمنظومة: ${memResult.summary} تم استرجاع سياق العمل وإرشادات وثيقة المرجع الموحد. المنظومة تعمل وفق مبدأ سيادة المالك والفصل التام بين الحقيقة والخطة.`;
+    const startedAt = Date.now();
+    const history = [...messages, userMsg]
+      .filter((message) => message.id !== 'm1')
+      .slice(-20)
+      .map(({ sender, text }) => ({ role: sender === 'assistant' ? 'assistant' : 'user', content: text }));
+    try {
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ messages: history }),
+      });
+      const result = await response.json();
+      if (!response.ok || typeof result.response !== 'string') {
+        throw new Error(result.message || result.error?.message || `تعذّر تنفيذ الطلب (HTTP ${response.status}).`);
       }
-
+      setConnectionStatus(`اتصال ناجح • ${result.model || 'Gemini'}`);
       const assistantMsg: ChatMessage = {
         id: 'ast-' + Date.now(),
         sender: 'assistant',
-        text: replyText,
+        text: result.response,
         timestamp: new Date().toLocaleTimeString('ar-EG'),
-        retrievedMemory: memResult.results,
-        executionTimeMs: memResult.executionTimeMs,
+        executionTimeMs: Date.now() - startedAt,
       };
-
       setMessages((prev) => [...prev, assistantMsg]);
-    }, 450);
+    } catch (error) {
+      setConnectionStatus('فشل الاتصال بالخادم');
+      const assistantMsg: ChatMessage = {
+        id: 'ast-error-' + Date.now(),
+        sender: 'assistant',
+        text: error instanceof Error ? error.message : 'تعذّر الاتصال بخادم NADA AI.',
+        timestamp: new Date().toLocaleTimeString('ar-EG'),
+      };
+      setMessages((prev) => [...prev, assistantMsg]);
+    } finally {
+      setIsSending(false);
+    }
   };
 
   return (
@@ -178,11 +175,11 @@ export function AssistantView({ onNavigate }: { onNavigate?: (key: string) => vo
             <div className="flex items-center gap-2">
               <h2 className="font-display font-bold text-lg text-primary">المساعد الشخصي NADA AI</h2>
               <span className="text-[10px] px-2 py-0.5 rounded-full bg-accent/20 text-accent font-bold">
-                متصل بالذاكرة المباشرة
+                {connectionStatus}
               </span>
             </div>
             <p className="text-xs text-muted">
-              استرجاع سياق المنظومة في أقل من ثانيتين • دعم الإدخال والقراءة الصوتية بالعربية
+              صوت عربي عند توفر إمكانات المتصفح • الردود تأتي عبر الخادم بعد نجاح الاتصال
             </p>
           </div>
         </div>
@@ -265,7 +262,7 @@ export function AssistantView({ onNavigate }: { onNavigate?: (key: string) => vo
                   {msg.executionTimeMs !== undefined && (
                     <span className="text-[10px] text-muted flex items-center gap-1">
                       <Clock className="w-3 h-3" />
-                      استرجاع الذاكرة في {msg.executionTimeMs}ms
+                      استجابة الخادم في {msg.executionTimeMs}ms
                     </span>
                   )}
                 </div>
@@ -351,7 +348,7 @@ export function AssistantView({ onNavigate }: { onNavigate?: (key: string) => vo
 
         <button
           type="submit"
-          disabled={!inputPrompt.trim()}
+          disabled={!inputPrompt.trim() || isSending}
           className="p-3 rounded-xl bg-accent text-white disabled:opacity-40 hover:opacity-90 transition-opacity flex items-center justify-center flex-shrink-0"
         >
           <Send className="w-5 h-5" />
