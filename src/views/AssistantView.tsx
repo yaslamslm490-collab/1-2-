@@ -14,7 +14,6 @@ import {
   Volume2,
   VolumeX,
   Sparkles,
-  Bot,
   User,
   Clock,
   Layers,
@@ -28,6 +27,8 @@ interface ChatMessage {
   retrievedMemory?: MemoryEntry[];
   executionTimeMs?: number;
 }
+
+const NADA_AVATAR_SRC = '/assets/characters/nada/nada-official.png';
 
 export function AssistantView({ onNavigate }: { onNavigate?: (key: string) => void }) {
   const { currentUser } = useApp();
@@ -243,8 +244,13 @@ export function AssistantView({ onNavigate }: { onNavigate?: (key: string) => vo
       {/* Header Bar */}
       <div className="card p-5 bg-gradient-to-l from-[var(--bg-card)] to-[var(--bg-elevated)] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-2xl bg-accent-dim flex items-center justify-center glow-accent flex-shrink-0">
-            <Bot className="w-6 h-6 text-accent" />
+          <div className="w-12 h-12 rounded-2xl bg-accent-dim overflow-hidden glow-accent flex-shrink-0">
+            <img
+              src={NADA_AVATAR_SRC}
+              alt="ندى — NADA AI"
+              className="w-full h-full object-cover"
+              style={{ objectPosition: '50% 30%' }}
+            />
           </div>
           <div>
             <div className="flex items-center gap-2">
@@ -341,7 +347,12 @@ export function AssistantView({ onNavigate }: { onNavigate?: (key: string) => vo
       <div className={`card p-4 sm:p-6 min-h-[420px] max-h-[560px] overflow-y-auto space-y-4 ${authStatus !== 'authenticated' ? 'hidden' : ''}`}>
         {messages.length === 0 && (
           <div className="min-h-[360px] flex flex-col items-center justify-center text-center text-muted gap-3">
-            <Bot className="w-10 h-10 text-accent" />
+            <img
+              src={NADA_AVATAR_SRC}
+              alt="ندى — NADA AI"
+              className="w-10 h-10 rounded-full object-cover shadow-md"
+              style={{ objectPosition: '50% 30%' }}
+            />
             <p className="text-sm">ابدأ محادثة جديدة؛ سيظهر الرد بعد استلام إجابة حقيقية من Gemini.</p>
           </div>
         )}
@@ -353,13 +364,22 @@ export function AssistantView({ onNavigate }: { onNavigate?: (key: string) => vo
             }`}
           >
             <div
-              className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${
+              className={`w-9 h-9 rounded-xl flex items-center justify-center overflow-hidden flex-shrink-0 ${
                 msg.sender === 'user'
                   ? 'bg-gradient-to-br from-teal-500 to-emerald-600 text-white'
                   : 'bg-elevated border border-default text-accent'
               }`}
             >
-              {msg.sender === 'user' ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
+              {msg.sender === 'user' ? (
+                <User className="w-4 h-4" />
+              ) : (
+                <img
+                  src={NADA_AVATAR_SRC}
+                  alt="ندى — NADA AI"
+                  className="w-full h-full object-cover"
+                  style={{ objectPosition: '50% 30%' }}
+                />
+              )}
             </div>
 
             <div
