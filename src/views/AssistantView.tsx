@@ -30,6 +30,24 @@ interface ChatMessage {
 
 const NADA_AVATAR_SRC = '/assets/characters/nada/nada-official.png';
 
+interface ApiHealth {
+  geminiConfigured?: boolean;
+  authConfigured?: boolean;
+  checks?: {
+    gemini?: string;
+    authentication?: string;
+  };
+}
+
+interface ApiSession {
+  configured?: boolean;
+  authenticated?: boolean;
+}
+
+function isConfiguredServiceStatus(status: unknown): boolean {
+  return status === 'ONLINE' || status === 'CONFIGURED_NOT_TESTED';
+}
+
 export function AssistantView({ onNavigate }: { onNavigate?: (key: string) => void }) {
   const { currentUser } = useApp();
 
@@ -61,12 +79,21 @@ export function AssistantView({ onNavigate }: { onNavigate?: (key: string) => vo
           fetch('/api/health', { credentials: 'include' }),
           fetch('/api/auth/session', { credentials: 'include' }),
         ]);
-        const [health, session] = await Promise.all([healthResponse.json(), sessionResponse.json()]);
+        const [healthPayload, sessionPayload] = await Promise.all([healthResponse.json(), sessionResponse.json()]);
+        const health = healthPayload as ApiHealth;
+        const session = sessionPayload as ApiSession;
         if (!active) return;
         if (!healthResponse.ok || !sessionResponse.ok) throw new Error('تعذّر فحص حالة الخادم.');
-        const hasGemini = Boolean(health.geminiConfigured);
+        const hasGemini = typeof health.geminiConfigured === 'boolean'
+          ? health.geminiConfigured
+          : isConfiguredServiceStatus(health.checks?.gemini);
+        const authConfigured = typeof session.configured === 'boolean'
+          ? session.configured
+          : typeof health.authConfigured === 'boolean'
+            ? health.authConfigured
+            : isConfiguredServiceStatus(health.checks?.authentication);
         setGeminiConfigured(hasGemini);
-        if (!session.configured) {
+        if (!authConfigured) {
           setAuthStatus('unconfigured');
           setConnectionStatus('مصادقة المالك غير مهيأة');
         } else if (session.authenticated) {
@@ -161,8 +188,13 @@ export function AssistantView({ onNavigate }: { onNavigate?: (key: string) => vo
 
     if (recognizer) {
       recognizerRef.current = recognizer;
-      recognizer.start();
-      setIsListening(true);
+      try {
+        recognizer.start();
+        setIsListening(true);
+      } catch {
+        recognizerRef.current = null;
+        setSpeechError('تعذّر بدء التعرف الصوتي. تحقّق من إذن الميكروفون واتصال الصفحة الآمن ثم حاول مجددًا.');
+      }
     }
   };
 
@@ -174,13 +206,17 @@ export function AssistantView({ onNavigate }: { onNavigate?: (key: string) => vo
     }
 
     setIsSpeaking(true);
-    speakArabic(text, {
+    const speechStarted = speakArabic(text, {
       pitch: 1.05,
       rate: 1.0,
       voiceGender: 'female',
       onEnd: () => setIsSpeaking(false),
       onError: () => setIsSpeaking(false),
     });
+    if (!speechStarted) {
+      setIsSpeaking(false);
+      setSpeechError('لم يبدأ النطق الصوتي؛ قد لا يدعمه هذا المتصفح أو تعذّر تشغيله.');
+    }
   };
 
   const handleSendPrompt = async (promptText?: string) => {
@@ -306,16 +342,16 @@ export function AssistantView({ onNavigate }: { onNavigate?: (key: string) => vo
 
       {authStatus !== 'authenticated' && (
         <div className="card p-6 space-y-4" aria-live="polite">
-          {authStatus === 'checking' && <p className="text-sm text-secondary">جارٍ التحقق من Worker وD1 والجلسة…</p>}
+          {authStatus === 'checking' && <p className="text-sm text-secondary">جارٍ التحقق من الخادم والجلسة…</p>}
           {authStatus === 'unconfigured' && (
             <div className="space-y-2">
               <h3 className="font-bold text-primary">مصادقة المالك غير مهيأة</h3>
-              <p className="text-sm text-secondary">أضف OWNER_MASTER_PASSWORD أو OWNER_API_TOKEN إلى أسرار Worker؛ لا تضعه في الواجهة أو GitHub.</p>
+              <p className="text-sm text-secondary">مصادقة المالك غير مهيأة في بيئة الخادم. اضبط OWNER_MASTER_PASSWORD أو OWNER_API_TOKEN في مدير الأسرار؛ لا تضعهما في الواجهة أو GitHub.</p>
             </div>
           )}
           {authStatus === 'error' && (
             <div className="space-y-3">
-              <p className="text-sm text-error">تعذّر الوصول إلى Worker أو D1. لم تُرسل أي رسالة إلى Gemini.</p>
+              <p className="text-sm text-error">تعذّر الاتصال بالخادم أو قاعدة البيانات. لم تُرسل أي رسالة إلى Gemini.</p>
               <button onClick={() => window.location.reload()} className="px-3 py-2 rounded-lg bg-elevated border border-default text-sm text-secondary">إعادة فحص الاتصال</button>
             </div>
           )}
