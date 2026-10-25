@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { scripts, statusLabels } from '@/data';
-import type { Script } from '@/types';
+import type { LegacyScript } from '@/data';
 import {
   FileText,
   Search,
@@ -24,7 +24,7 @@ function ScriptListItem({
   isSelected,
   onClick,
 }: {
-  script: Script;
+  script: LegacyScript;
   isSelected: boolean;
   onClick: () => void;
 }) {
@@ -60,7 +60,7 @@ function ScriptListItem({
   );
 }
 
-function ScriptDetail({ script }: { script: Script }) {
+function ScriptDetail({ script }: { script: LegacyScript }) {
   const style = statusStyles[script.status] ?? statusStyles.draft;
   return (
     <div className="card p-6 space-y-6 animate-fade-up">

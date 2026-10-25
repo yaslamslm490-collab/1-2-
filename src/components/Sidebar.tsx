@@ -1,5 +1,5 @@
 import { useApp } from '@/context/AppContext';
-import type { ViewKey } from '@/types';
+import type { UserRole, ViewKey } from '@/types';
 import {
   Crown,
   LayoutDashboard,

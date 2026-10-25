@@ -61,11 +61,8 @@ export function VoiceStudioView() {
 
     setSttError(null);
     if (!isSpeechRecognitionSupported()) {
-      setIsRecording(true);
-      setTimeout(() => {
-        setRecordedTranscript('تجربة التعرف على الصوت باللغة العربية: تم رصد الصوت ومعالجة النص بنجاح.');
-        setIsRecording(false);
-      }, 1800);
+      setIsRecording(false);
+      setSttError('التعرف الصوتي غير مدعوم في هذا المتصفح. لم يتم إنشاء نص تجريبي؛ استخدم الإدخال النصي أو افتح الصفحة في متصفح يدعم الميكروفون.');
       return;
     }
 
@@ -84,8 +81,16 @@ export function VoiceStudioView() {
     );
 
     if (recognizer) {
-      recognizer.start();
-      setIsRecording(true);
+      try {
+        recognizer.start();
+        setIsRecording(true);
+      } catch {
+        setIsRecording(false);
+        setSttError('تعذّر بدء الميكروفون. تحقق من HTTPS وإذن الميكروفون ثم حاول مرة أخرى.');
+      }
+    } else {
+      setIsRecording(false);
+      setSttError('تعذّر تهيئة التعرف الصوتي في هذا المتصفح.');
     }
   };
 
@@ -96,14 +101,19 @@ export function VoiceStudioView() {
       return;
     }
 
-    setIsSpeakingCustom(true);
-    speakArabic(ttsInputText, {
+    const started = speakArabic(ttsInputText, {
       pitch: ttsPitch,
       rate: ttsRate,
       voiceGender: ttsGender,
       onEnd: () => setIsSpeakingCustom(false),
       onError: () => setIsSpeakingCustom(false),
     });
+    if (!started) {
+      setIsSpeakingCustom(false);
+      setSttError('تعذّر تشغيل النطق العربي في هذا المتصفح؛ لم يتم اعتبار الرنين الصوتي ردًا صوتيًا.');
+      return;
+    }
+    setIsSpeakingCustom(true);
   };
 
   const handleAuditionChar = (charId: string, text: string, pitch: number, rate: number, gender: 'male' | 'female') => {
@@ -113,14 +123,16 @@ export function VoiceStudioView() {
       return;
     }
 
-    setAuditioningCharId(charId);
-    speakArabic(text, {
+    const started = speakArabic(text, {
       pitch,
       rate,
       voiceGender: gender,
       onEnd: () => setAuditioningCharId(null),
       onError: () => setAuditioningCharId(null),
     });
+    if (started) {
+      setAuditioningCharId(charId);
+    }
   };
 
   const handleTestTone = () => {
@@ -169,8 +181,9 @@ export function VoiceStudioView() {
                 <p className="text-xs text-muted">تحويل الكلام العربي المنطوق إلى نصوص</p>
               </div>
             </div>
-            <span className="text-xs px-2.5 py-1 rounded-full bg-accent/15 text-accent font-bold flex items-center gap-1">
-              <CheckCircle2 className="w-3.5 h-3.5" /> متاح وجاهز
+            <span className={`text-xs px-2.5 py-1 rounded-full font-bold flex items-center gap-1 ${isSpeechRecognitionSupported() ? 'bg-accent/15 text-accent' : 'bg-amber-500/15 text-warning'}`}>
+              {isSpeechRecognitionSupported() ? <CheckCircle2 className="w-3.5 h-3.5" /> : <MicOff className="w-3.5 h-3.5" />}
+              {isSpeechRecognitionSupported() ? 'مدعوم في المتصفح' : 'غير مدعوم — استخدم النص'}
             </span>
           </div>
           <p className="text-xs text-secondary leading-relaxed">
@@ -190,8 +203,9 @@ export function VoiceStudioView() {
                 <p className="text-xs text-muted">تخليق النطق العربي بالطبقات المتعددة</p>
               </div>
             </div>
-            <span className="text-xs px-2.5 py-1 rounded-full bg-info/15 text-info font-bold flex items-center gap-1">
-              <CheckCircle2 className="w-3.5 h-3.5" /> متاح ({availableVoices.length} أصوات)
+            <span className={`text-xs px-2.5 py-1 rounded-full font-bold flex items-center gap-1 ${isSpeechSynthesisSupported() ? 'bg-info/15 text-info' : 'bg-amber-500/15 text-warning'}`}>
+              {isSpeechSynthesisSupported() ? <CheckCircle2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
+              {isSpeechSynthesisSupported() ? `متاح (${availableVoices.length} أصوات)` : 'غير مدعوم'}
             </span>
           </div>
           <p className="text-xs text-secondary leading-relaxed">

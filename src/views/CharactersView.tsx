@@ -197,7 +197,6 @@ export function CharactersView() {
                 <button
                   onClick={() => {
                     setSelectedCharacter(char);
-                    setIsEditingBible(false);
                   }}
                   className="py-2 px-3 rounded-xl bg-elevated hover:bg-elevated/80 border border-default text-xs font-bold text-primary transition-colors flex items-center gap-1"
                 >

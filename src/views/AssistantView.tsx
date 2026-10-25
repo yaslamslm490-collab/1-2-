@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { type FormEvent, useState, useEffect, useRef } from 'react';
 import { useApp } from '@/context/AppContext';
 import {
   speakArabic,
@@ -14,7 +14,6 @@ import {
   Volume2,
   VolumeX,
   Sparkles,
-  Bot,
   User,
   Clock,
   Layers,
@@ -29,28 +28,159 @@ interface ChatMessage {
   executionTimeMs?: number;
 }
 
+const NADA_AVATAR_SRC = '/assets/characters/nada/nada-official.png';
+
+type ApiPayload = Record<string, unknown>;
+
+async function readApiJson(response: Response): Promise<ApiPayload> {
+  const contentType = response.headers.get('content-type')?.toLowerCase() || '';
+  const body = await response.text();
+  if (!contentType.includes('application/json')) {
+    throw new Error(`استجاب الخادم بمحتوى غير JSON (HTTP ${response.status}). تحقق من عنوان API وإعدادات النشر.`);
+  }
+  try {
+    const payload: unknown = JSON.parse(body);
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      throw new Error('استجاب الخادم بصيغة JSON غير صالحة.');
+    }
+    return payload as ApiPayload;
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('استجاب الخادم')) throw error;
+    throw new Error(`تعذّر تحليل استجابة الخادم كـJSON (HTTP ${response.status}).`);
+  }
+}
+
+function apiErrorMessage(payload: ApiPayload, status: number): string {
+  const message = typeof payload.message === 'string' ? payload.message : '';
+  const error = typeof payload.error === 'string' ? payload.error : '';
+  return message || error || `تعذّر تنفيذ الطلب (HTTP ${status}).`;
+}
+
+interface ApiHealth {
+  geminiConfigured?: boolean;
+  authConfigured?: boolean;
+  checks?: {
+    gemini?: string;
+    authentication?: string;
+  };
+}
+
+interface ApiSession {
+  configured?: boolean;
+  authenticated?: boolean;
+}
+
+function isConfiguredServiceStatus(status: unknown): boolean {
+  return status === 'ONLINE' || status === 'CONFIGURED_NOT_TESTED';
+}
+
 export function AssistantView({ onNavigate }: { onNavigate?: (key: string) => void }) {
-  const { queryInstantMemory, currentUser, projects, approvals } = useApp();
+  const { currentUser } = useApp();
 
   const [inputPrompt, setInputPrompt] = useState('');
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: 'm1',
-      sender: 'assistant',
-      text: `أهلاً بك يا ${currentUser.name} في المساعد الشخصي الموحد NADA AI. أنا متصل بالذاكرة الدائمة للمنظومة (المكونات الـ 12)، وأستطيع استرجاع سياق المشروعات، الشخصيات الـ 11، والموافقات المعلقة في أقل من ثانيتين. كيف أخدمك اليوم؟`,
-      timestamp: 'الآن',
-    },
-  ]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
 
   const [isListening, setIsListening] = useState(false);
+  const [isSending, setIsSending] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState('جارٍ فحص الخادم…');
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [speechError, setSpeechError] = useState<string | null>(null);
+  const [authStatus, setAuthStatus] = useState<'checking' | 'signed-out' | 'authenticated' | 'unconfigured' | 'error'>('checking');
+  const [ownerToken, setOwnerToken] = useState('');
+  const [authError, setAuthError] = useState('');
+  const [isAuthenticating, setIsAuthenticating] = useState(false);
+  const [geminiConfigured, setGeminiConfigured] = useState(false);
   const recognizerRef = useRef<ReturnType<typeof createArabicSpeechRecognizer> | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  useEffect(() => {
+    let active = true;
+    const checkServer = async () => {
+      try {
+        const [healthResponse, sessionResponse] = await Promise.all([
+          fetch('/api/health', { credentials: 'include' }),
+          fetch('/api/auth/session', { credentials: 'include' }),
+        ]);
+        const [healthPayload, sessionPayload] = await Promise.all([readApiJson(healthResponse), readApiJson(sessionResponse)]);
+        const health = healthPayload as ApiHealth;
+        const session = sessionPayload as ApiSession;
+        if (!active) return;
+        if (!healthResponse.ok || !sessionResponse.ok) throw new Error('تعذّر فحص حالة الخادم.');
+        const hasGemini = typeof health.geminiConfigured === 'boolean'
+          ? health.geminiConfigured
+          : isConfiguredServiceStatus(health.checks?.gemini);
+        const authConfigured = typeof session.configured === 'boolean'
+          ? session.configured
+          : typeof health.authConfigured === 'boolean'
+            ? health.authConfigured
+            : isConfiguredServiceStatus(health.checks?.authentication);
+        setGeminiConfigured(hasGemini);
+        if (!authConfigured) {
+          setAuthStatus('unconfigured');
+          setConnectionStatus('مصادقة المالك غير مهيأة');
+        } else if (session.authenticated) {
+          setAuthStatus('authenticated');
+          setConnectionStatus(hasGemini ? 'الجلسة جاهزة • Gemini لم يُختبر بعد' : 'Gemini غير مهيأ');
+        } else {
+          setAuthStatus('signed-out');
+          setConnectionStatus(hasGemini ? 'الخادم متاح • يلزم تسجيل دخول المالك' : 'Gemini غير مهيأ');
+        }
+      } catch {
+        if (!active) return;
+        setAuthStatus('error');
+        setConnectionStatus('فشل فحص اتصال الخادم');
+      }
+    };
+    void checkServer();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!ownerToken.trim() || isAuthenticating) return;
+    setIsAuthenticating(true);
+    setAuthError('');
+    try {
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ token: ownerToken }),
+      });
+      const result = await readApiJson(response);
+      if (!response.ok || result.authenticated !== true) {
+        throw new Error(apiErrorMessage(result, response.status));
+      }
+      setOwnerToken('');
+      setAuthStatus('authenticated');
+      setConnectionStatus(geminiConfigured ? 'جلسة المالك جاهزة • Gemini لم يُختبر بعد' : 'جلسة المالك جاهزة • Gemini غير مهيأ');
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : 'تعذّر تسجيل الدخول.');
+    } finally {
+      setIsAuthenticating(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        credentials: 'include',
+      });
+    } catch {
+      // Clear the client-side state even if the logout request cannot reach the server.
+    } finally {
+      setMessages([]);
+      setAuthStatus('signed-out');
+      setConnectionStatus('تم تسجيل الخروج');
+    }
+  };
 
   // Voice Input (STT) setup
   const toggleListening = () => {
@@ -62,19 +192,7 @@ export function AssistantView({ onNavigate }: { onNavigate?: (key: string) => vo
 
     setSpeechError(null);
     if (!isSpeechRecognitionSupported()) {
-      // Simulate voice input for environments where mic access is blocked
-      setIsListening(true);
-      setTimeout(() => {
-        const samplePhrases = [
-          'ما هي حالة المشروعات الحالية؟',
-          'استرجع قرارات المالك المسجلة',
-          'اقترح فكرة سكريبت لعم حسن عن صيانة المحابس',
-          'أعطني ملخص تسليم واستئناف فوري',
-        ];
-        const phrase = samplePhrases[Math.floor(Math.random() * samplePhrases.length)];
-        setInputPrompt(phrase);
-        setIsListening(false);
-      }, 1500);
+      setSpeechError('التعرف الصوتي غير متاح في هذا المتصفح. يمكنك كتابة رسالتك بدلًا منه.');
       return;
     }
 
@@ -96,8 +214,13 @@ export function AssistantView({ onNavigate }: { onNavigate?: (key: string) => vo
 
     if (recognizer) {
       recognizerRef.current = recognizer;
-      recognizer.start();
-      setIsListening(true);
+      try {
+        recognizer.start();
+        setIsListening(true);
+      } catch {
+        recognizerRef.current = null;
+        setSpeechError('تعذّر بدء التعرف الصوتي. تحقّق من إذن الميكروفون واتصال الصفحة الآمن ثم حاول مجددًا.');
+      }
     }
   };
 
@@ -109,18 +232,23 @@ export function AssistantView({ onNavigate }: { onNavigate?: (key: string) => vo
     }
 
     setIsSpeaking(true);
-    speakArabic(text, {
+    const speechStarted = speakArabic(text, {
       pitch: 1.05,
       rate: 1.0,
       voiceGender: 'female',
       onEnd: () => setIsSpeaking(false),
       onError: () => setIsSpeaking(false),
     });
+    if (!speechStarted) {
+      setIsSpeaking(false);
+      setSpeechError('لم يبدأ النطق الصوتي؛ قد لا يدعمه هذا المتصفح أو تعذّر تشغيله.');
+    }
   };
 
-  const handleSendPrompt = (promptText?: string) => {
+  const handleSendPrompt = async (promptText?: string) => {
     const textToSend = (promptText || inputPrompt).trim();
-    if (!textToSend) return;
+    if (!textToSend || isSending || authStatus !== 'authenticated') return;
+    setIsSending(true);
 
     const userMsg: ChatMessage = {
       id: 'usr-' + Date.now(),
@@ -131,39 +259,46 @@ export function AssistantView({ onNavigate }: { onNavigate?: (key: string) => vo
 
     setMessages((prev) => [...prev, userMsg]);
     setInputPrompt('');
+    setConnectionStatus('جارٍ الاتصال بالخادم…');
 
-    // Query permanent memory instant reader
-    const memResult = queryInstantMemory(textToSend);
-
-    // Formulate authoritative assistant answer
-    setTimeout(() => {
-      let replyText = '';
-      const lower = textToSend.toLowerCase();
-
-      if (lower.includes('مشروع') || lower.includes('مشروعات')) {
-        replyText = `حالة المشروعات: لدينا حالياً ${projects.length} مشاريع نشطة. أبرزها مشروع "دليل البيت الآمن" بنسبة إنجاز 75%، ومشروع "سلسلة ليان" بنسبة 95% وهو بانتظار الاعتماد النهائي. إجمالي الميزانية المرصودة $63,000.`;
-      } else if (lower.includes('شخصي') || lower.includes('شخصيات') || lower.includes('حسن') || lower.includes('ليان')) {
-        replyText = `كتالوج الشخصيات يضم 11 شخصية رسمية معتمدة من CHAR-001 (ليان) إلى CHAR-011 (خبير الطعام والمزاج). كل شخصية تمتلك Character Bible كامل وقواعد استمرارية DO/DON'T وبصمة صوتية فريدة.`;
-      } else if (lower.includes('موافق') || lower.includes('قرار')) {
-        const pending = approvals.filter((a) => a.status === 'pending');
-        replyText = `سجل القرارات والموافقات: هناك ${pending.length} طلبات معلقة بانتظار قرار المالك (OWNER). أهمها اعتماد خطة النشر الأسبوعية وسكريبت ليان الجديد.`;
-      } else if (lower.includes('ملخص') || lower.includes('استئناف') || lower.includes('تسليم')) {
-        replyText = `ملخص الاستئناف الفوري (Instant Handoff): المنظومة تعمل بكامل كفاءتها على الإصدار 3.0 الموحد. تم إصلاح أزرار التحكم والربط الصوتي، والذاكرة الدائمة مفهرسة. الخطوة التالية المقترحة: اعتماد خطة النشر الأسبوعية وتجربة استوديو الصوت.`;
-      } else {
-        replyText = `بناءً على الذاكرة الدائمة للمنظومة: ${memResult.summary} تم استرجاع سياق العمل وإرشادات وثيقة المرجع الموحد. المنظومة تعمل وفق مبدأ سيادة المالك والفصل التام بين الحقيقة والخطة.`;
+    const startedAt = Date.now();
+    const history = [...messages, userMsg]
+      .filter((message) => message.id !== 'm1')
+      .slice(-20)
+      .map(({ sender, text }) => ({ role: sender === 'assistant' ? 'assistant' : 'user', content: text }));
+    try {
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ messages: history }),
+      });
+      const result = await readApiJson(response);
+      if (!response.ok || typeof result.response !== 'string') {
+        if (response.status === 401) setAuthStatus('signed-out');
+        throw new Error(apiErrorMessage(result, response.status));
       }
-
+      setConnectionStatus(`اتصال ناجح • ${result.model || 'Gemini'}`);
       const assistantMsg: ChatMessage = {
         id: 'ast-' + Date.now(),
         sender: 'assistant',
-        text: replyText,
+        text: result.response,
         timestamp: new Date().toLocaleTimeString('ar-EG'),
-        retrievedMemory: memResult.results,
-        executionTimeMs: memResult.executionTimeMs,
+        executionTimeMs: Date.now() - startedAt,
       };
-
       setMessages((prev) => [...prev, assistantMsg]);
-    }, 450);
+    } catch (error) {
+      setConnectionStatus('فشل الاتصال بالخادم');
+      const assistantMsg: ChatMessage = {
+        id: 'ast-error-' + Date.now(),
+        sender: 'assistant',
+        text: error instanceof Error ? error.message : 'تعذّر الاتصال بخادم NADA AI.',
+        timestamp: new Date().toLocaleTimeString('ar-EG'),
+      };
+      setMessages((prev) => [...prev, assistantMsg]);
+    } finally {
+      setIsSending(false);
+    }
   };
 
   return (
@@ -171,23 +306,36 @@ export function AssistantView({ onNavigate }: { onNavigate?: (key: string) => vo
       {/* Header Bar */}
       <div className="card p-5 bg-gradient-to-l from-[var(--bg-card)] to-[var(--bg-elevated)] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-2xl bg-accent-dim flex items-center justify-center glow-accent flex-shrink-0">
-            <Bot className="w-6 h-6 text-accent" />
+          <div className="w-12 h-12 rounded-2xl bg-accent-dim overflow-hidden glow-accent flex-shrink-0">
+            <img
+              src={NADA_AVATAR_SRC}
+              alt="ندى — NADA AI"
+              className="w-full h-full object-cover"
+              style={{ objectPosition: '50% 30%' }}
+            />
           </div>
           <div>
             <div className="flex items-center gap-2">
               <h2 className="font-display font-bold text-lg text-primary">المساعد الشخصي NADA AI</h2>
               <span className="text-[10px] px-2 py-0.5 rounded-full bg-accent/20 text-accent font-bold">
-                متصل بالذاكرة المباشرة
+                {connectionStatus}
               </span>
             </div>
             <p className="text-xs text-muted">
-              استرجاع سياق المنظومة في أقل من ثانيتين • دعم الإدخال والقراءة الصوتية بالعربية
+              صوت عربي عند توفر إمكانات المتصفح • الردود تأتي عبر الخادم بعد نجاح الاتصال
             </p>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
+          {authStatus === 'authenticated' && (
+            <button
+              onClick={() => void handleLogout()}
+              className="px-3 py-1.5 rounded-lg bg-elevated hover:bg-elevated/80 border border-default text-xs font-medium text-secondary transition-colors"
+            >
+              تسجيل الخروج
+            </button>
+          )}
           {isSpeaking && (
             <button
               onClick={() => {
@@ -218,8 +366,58 @@ export function AssistantView({ onNavigate }: { onNavigate?: (key: string) => vo
         </div>
       )}
 
+      {authStatus !== 'authenticated' && (
+        <div className="card p-6 space-y-4" aria-live="polite">
+          {authStatus === 'checking' && <p className="text-sm text-secondary">جارٍ التحقق من الخادم والجلسة…</p>}
+          {authStatus === 'unconfigured' && (
+            <div className="space-y-2">
+              <h3 className="font-bold text-primary">مصادقة المالك غير مهيأة</h3>
+              <p className="text-sm text-secondary">مصادقة المالك غير مهيأة في بيئة الخادم. اضبط OWNER_MASTER_PASSWORD أو OWNER_API_TOKEN في مدير الأسرار؛ لا تضعهما في الواجهة أو GitHub.</p>
+            </div>
+          )}
+          {authStatus === 'error' && (
+            <div className="space-y-3">
+              <p className="text-sm text-error">تعذّر الاتصال بالخادم أو قاعدة البيانات. لم تُرسل أي رسالة إلى Gemini.</p>
+              <button onClick={() => window.location.reload()} className="px-3 py-2 rounded-lg bg-elevated border border-default text-sm text-secondary">إعادة فحص الاتصال</button>
+            </div>
+          )}
+          {authStatus === 'signed-out' && (
+            <form onSubmit={(event) => void handleLogin(event)} className="space-y-3 max-w-md">
+              <div>
+                <h3 className="font-bold text-primary">تسجيل دخول المالك</h3>
+                <p className="text-xs text-muted mt-1">رمز المالك يُرسل إلى الخادم الآمن ولا يُحفظ في المتصفح.</p>
+              </div>
+              <input
+                type="password"
+                value={ownerToken}
+                onChange={(event) => setOwnerToken(event.target.value)}
+                autoComplete="current-password"
+                placeholder="رمز دخول المالك"
+                className="w-full rounded-xl bg-elevated border border-default px-4 py-3 text-sm text-primary outline-none focus:border-accent"
+                aria-label="رمز دخول المالك"
+              />
+              {authError && <p role="alert" className="text-sm text-error">{authError}</p>}
+              <button type="submit" disabled={!ownerToken.trim() || isAuthenticating} className="px-4 py-2.5 rounded-lg bg-accent text-white text-sm font-bold disabled:opacity-40">
+                {isAuthenticating ? 'جارٍ التحقق…' : 'دخول آمن'}
+              </button>
+            </form>
+          )}
+        </div>
+      )}
+
       {/* Chat Messages Log */}
-      <div className="card p-4 sm:p-6 min-h-[420px] max-h-[560px] overflow-y-auto space-y-4">
+      <div className={`card p-4 sm:p-6 min-h-[420px] max-h-[560px] overflow-y-auto space-y-4 ${authStatus !== 'authenticated' ? 'hidden' : ''}`}>
+        {messages.length === 0 && (
+          <div className="min-h-[360px] flex flex-col items-center justify-center text-center text-muted gap-3">
+            <img
+              src={NADA_AVATAR_SRC}
+              alt="ندى — NADA AI"
+              className="w-10 h-10 rounded-full object-cover shadow-md"
+              style={{ objectPosition: '50% 30%' }}
+            />
+            <p className="text-sm">ابدأ محادثة جديدة؛ سيظهر الرد بعد استلام إجابة حقيقية من Gemini.</p>
+          </div>
+        )}
         {messages.map((msg) => (
           <div
             key={msg.id}
@@ -228,13 +426,22 @@ export function AssistantView({ onNavigate }: { onNavigate?: (key: string) => vo
             }`}
           >
             <div
-              className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${
+              className={`w-9 h-9 rounded-xl flex items-center justify-center overflow-hidden flex-shrink-0 ${
                 msg.sender === 'user'
                   ? 'bg-gradient-to-br from-teal-500 to-emerald-600 text-white'
                   : 'bg-elevated border border-default text-accent'
               }`}
             >
-              {msg.sender === 'user' ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
+              {msg.sender === 'user' ? (
+                <User className="w-4 h-4" />
+              ) : (
+                <img
+                  src={NADA_AVATAR_SRC}
+                  alt="ندى — NADA AI"
+                  className="w-full h-full object-cover"
+                  style={{ objectPosition: '50% 30%' }}
+                />
+              )}
             </div>
 
             <div
@@ -265,7 +472,7 @@ export function AssistantView({ onNavigate }: { onNavigate?: (key: string) => vo
                   {msg.executionTimeMs !== undefined && (
                     <span className="text-[10px] text-muted flex items-center gap-1">
                       <Clock className="w-3 h-3" />
-                      استرجاع الذاكرة في {msg.executionTimeMs}ms
+                      استجابة الخادم في {msg.executionTimeMs}ms
                     </span>
                   )}
                 </div>
@@ -298,7 +505,7 @@ export function AssistantView({ onNavigate }: { onNavigate?: (key: string) => vo
       </div>
 
       {/* Suggested Quick Prompts */}
-      <div className="flex flex-wrap gap-2 pt-1">
+      <div className={`flex flex-wrap gap-2 pt-1 ${authStatus !== 'authenticated' ? 'hidden' : ''}`}>
         {[
           'ما هي حالة المشروعات الحالية؟',
           'استرجع قرارات المالك المسجلة',
@@ -322,7 +529,7 @@ export function AssistantView({ onNavigate }: { onNavigate?: (key: string) => vo
           e.preventDefault();
           handleSendPrompt();
         }}
-        className="card p-3 flex items-center gap-2"
+        className={`card p-3 flex items-center gap-2 ${authStatus !== 'authenticated' ? 'hidden' : ''}`}
       >
         <button
           type="button"
@@ -351,7 +558,7 @@ export function AssistantView({ onNavigate }: { onNavigate?: (key: string) => vo
 
         <button
           type="submit"
-          disabled={!inputPrompt.trim()}
+          disabled={!inputPrompt.trim() || isSending}
           className="p-3 rounded-xl bg-accent text-white disabled:opacity-40 hover:opacity-90 transition-opacity flex items-center justify-center flex-shrink-0"
         >
           <Send className="w-5 h-5" />

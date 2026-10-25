@@ -1,3 +1,11 @@
+import type { LucideIcon } from 'lucide-react';
+
+export interface NavItem {
+  key: string;
+  label: string;
+  icon: LucideIcon;
+}
+
 export type ViewKey =
   | 'owner_center'
   | 'dashboard'
@@ -82,6 +90,21 @@ export interface Character {
   avatarColor: string;
   image?: string;
   bible: CharacterBible;
+}
+
+export interface Persona {
+  id: string;
+  name: string;
+  role: string;
+  image: string;
+  platforms: string[];
+  status: 'active' | 'paused';
+  tone: string;
+  systemPrompt: string;
+  contentCount: number;
+  engagement: number;
+  code?: string;
+  bible?: Pick<CharacterBible, 'identity' | 'rules' | 'prompts'>;
 }
 
 export interface StatCard {

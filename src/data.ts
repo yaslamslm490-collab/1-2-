@@ -4,10 +4,7 @@ import {
   FileText,
   Network,
   CheckSquare,
-  Film,
   Radio,
-  TrendingUp,
-  AlertCircle,
   Zap,
   Brain,
   Sparkles,
@@ -22,11 +19,28 @@ import type {
   StatCard,
   AgentInfo,
   Character,
-  Script,
   Route,
   ApprovalItem,
   Persona,
 } from './types';
+
+type CharacterSummary = Pick<
+  Character,
+  'id' | 'name' | 'archetype' | 'audience' | 'tone' | 'platforms' | 'contentCount' | 'engagement' | 'status' | 'avatarColor'
+>;
+
+export interface LegacyScript {
+  id: string;
+  title: string;
+  character: string;
+  platform: string;
+  status: 'draft' | 'review' | 'approved' | 'published';
+  wordCount: number;
+  updatedAt: string;
+  hook: string;
+  body: string;
+  cta: string;
+}
 
 export const navItems: NavItem[] = [
   { key: 'dashboard', label: 'لوحة التحكم', icon: LayoutDashboard },
@@ -45,7 +59,7 @@ export const statsCards: StatCard[] = [
     subValue: 'محتوى هذا الأسبوع',
     trend: 18,
     trendUp: true,
-    icon: Film,
+    icon: 'Film',
     color: 'accent',
   },
   {
@@ -55,7 +69,7 @@ export const statsCards: StatCard[] = [
     subValue: 'من 15 شخصية',
     trend: 8,
     trendUp: true,
-    icon: Users,
+    icon: 'Users',
     color: 'info',
   },
   {
@@ -65,7 +79,7 @@ export const statsCards: StatCard[] = [
     subValue: 'بانتظار المراجعة',
     trend: 5,
     trendUp: false,
-    icon: AlertCircle,
+    icon: 'AlertCircle',
     color: 'warning',
   },
   {
@@ -75,7 +89,7 @@ export const statsCards: StatCard[] = [
     subValue: 'متوسط 30 يوم',
     trend: 23,
     trendUp: true,
-    icon: TrendingUp,
+    icon: 'TrendingUp',
     color: 'accent',
   },
 ];
@@ -89,6 +103,7 @@ export const agents: AgentInfo[] = [
     task: 'إنشاء سكريبت فيديو لشخصية "المحلل التقني"',
     progress: 72,
     lastActive: 'الآن',
+    department: 'المحتوى',
   },
   {
     id: 'agent-2',
@@ -98,6 +113,7 @@ export const agents: AgentInfo[] = [
     task: 'نشر محتوى على 4 منصات',
     progress: 45,
     lastActive: 'قبل 2 دقيقة',
+    department: 'التوزيع',
   },
   {
     id: 'agent-3',
@@ -107,6 +123,7 @@ export const agents: AgentInfo[] = [
     task: 'في انتظار بيانات الأداء',
     progress: 0,
     lastActive: 'قبل 15 دقيقة',
+    department: 'التحليلات',
   },
   {
     id: 'agent-4',
@@ -116,6 +133,7 @@ export const agents: AgentInfo[] = [
     task: 'الرد على 23 تعليق',
     progress: 88,
     lastActive: 'الآن',
+    department: 'التفاعل',
   },
   {
     id: 'agent-5',
@@ -125,6 +143,7 @@ export const agents: AgentInfo[] = [
     task: 'فشل في توليد صورة — إعادة المحاولة',
     progress: 30,
     lastActive: 'قبل 5 دقائق',
+    department: 'المرئيات',
   },
   {
     id: 'agent-6',
@@ -134,10 +153,11 @@ export const agents: AgentInfo[] = [
     task: 'غير متصل',
     progress: 0,
     lastActive: 'قبل ساعة',
+    department: 'الجدولة',
   },
 ];
 
-export const characters: Character[] = [
+export const characters: CharacterSummary[] = [
   {
     id: 'c1',
     name: 'المحلل التقني',
@@ -212,7 +232,7 @@ export const characters: Character[] = [
   },
 ];
 
-export const scripts: Script[] = [
+export const scripts: LegacyScript[] = [
   {
     id: 's1',
     title: 'مراجعة هاتف Galaxy S25 Ultra',
@@ -348,6 +368,7 @@ export const approvalItems: ApprovalItem[] = [
     priority: 'high',
     status: 'pending',
     summary: 'سكريبت فيديو لليوتيوب — 1240 كلمة — شخصية: المحلل التقني',
+    requiresOwnerApproval: true,
   },
   {
     id: 'a2',
@@ -358,6 +379,7 @@ export const approvalItems: ApprovalItem[] = [
     priority: 'medium',
     status: 'pending',
     summary: 'بوست إنستغرام مع 4 صور — شخصية: المستكشف',
+    requiresOwnerApproval: true,
   },
   {
     id: 'a3',
@@ -368,6 +390,7 @@ export const approvalItems: ApprovalItem[] = [
     priority: 'urgent',
     status: 'pending',
     summary: 'شخصية طبية جديدة موجهة لجمهور المهتمين بالصحة — 5 منصات',
+    requiresOwnerApproval: true,
   },
   {
     id: 'a4',
@@ -378,6 +401,7 @@ export const approvalItems: ApprovalItem[] = [
     priority: 'medium',
     status: 'pending',
     summary: 'حملة أسبوعية — 14 محتوى — 3 شخصيات — 4 منصات',
+    requiresOwnerApproval: true,
   },
   {
     id: 'a5',
@@ -388,6 +412,7 @@ export const approvalItems: ApprovalItem[] = [
     priority: 'low',
     status: 'approved',
     summary: 'سكريبت تيك توك — 320 كلمة — شخصية: الراوي',
+    requiresOwnerApproval: false,
   },
   {
     id: 'a6',
@@ -398,6 +423,7 @@ export const approvalItems: ApprovalItem[] = [
     priority: 'low',
     status: 'approved',
     summary: 'مقال لينكدإن — 670 كلمة — شخصية: الناقد',
+    requiresOwnerApproval: false,
   },
 ];
 
