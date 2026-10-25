@@ -30,6 +30,32 @@ interface ChatMessage {
 
 const NADA_AVATAR_SRC = '/assets/characters/nada/nada-official.png';
 
+type ApiPayload = Record<string, unknown>;
+
+async function readApiJson(response: Response): Promise<ApiPayload> {
+  const contentType = response.headers.get('content-type')?.toLowerCase() || '';
+  const body = await response.text();
+  if (!contentType.includes('application/json')) {
+    throw new Error(`استجاب الخادم بمحتوى غير JSON (HTTP ${response.status}). تحقق من عنوان API وإعدادات النشر.`);
+  }
+  try {
+    const payload: unknown = JSON.parse(body);
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      throw new Error('استجاب الخادم بصيغة JSON غير صالحة.');
+    }
+    return payload as ApiPayload;
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('استجاب الخادم')) throw error;
+    throw new Error(`تعذّر تحليل استجابة الخادم كـJSON (HTTP ${response.status}).`);
+  }
+}
+
+function apiErrorMessage(payload: ApiPayload, status: number): string {
+  const message = typeof payload.message === 'string' ? payload.message : '';
+  const error = typeof payload.error === 'string' ? payload.error : '';
+  return message || error || `تعذّر تنفيذ الطلب (HTTP ${status}).`;
+}
+
 interface ApiHealth {
   geminiConfigured?: boolean;
   authConfigured?: boolean;
@@ -79,7 +105,7 @@ export function AssistantView({ onNavigate }: { onNavigate?: (key: string) => vo
           fetch('/api/health', { credentials: 'include' }),
           fetch('/api/auth/session', { credentials: 'include' }),
         ]);
-        const [healthPayload, sessionPayload] = await Promise.all([healthResponse.json(), sessionResponse.json()]);
+        const [healthPayload, sessionPayload] = await Promise.all([readApiJson(healthResponse), readApiJson(sessionResponse)]);
         const health = healthPayload as ApiHealth;
         const session = sessionPayload as ApiSession;
         if (!active) return;
@@ -127,9 +153,9 @@ export function AssistantView({ onNavigate }: { onNavigate?: (key: string) => vo
         credentials: 'include',
         body: JSON.stringify({ token: ownerToken }),
       });
-      const result = await response.json();
+      const result = await readApiJson(response);
       if (!response.ok || result.authenticated !== true) {
-        throw new Error(result.message || `تعذّر تسجيل الدخول (HTTP ${response.status}).`);
+        throw new Error(apiErrorMessage(result, response.status));
       }
       setOwnerToken('');
       setAuthStatus('authenticated');
@@ -247,10 +273,10 @@ export function AssistantView({ onNavigate }: { onNavigate?: (key: string) => vo
         credentials: 'include',
         body: JSON.stringify({ messages: history }),
       });
-      const result = await response.json();
+      const result = await readApiJson(response);
       if (!response.ok || typeof result.response !== 'string') {
         if (response.status === 401) setAuthStatus('signed-out');
-        throw new Error(result.message || result.error?.message || `تعذّر تنفيذ الطلب (HTTP ${response.status}).`);
+        throw new Error(apiErrorMessage(result, response.status));
       }
       setConnectionStatus(`اتصال ناجح • ${result.model || 'Gemini'}`);
       const assistantMsg: ChatMessage = {
