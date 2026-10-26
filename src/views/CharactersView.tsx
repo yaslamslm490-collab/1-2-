@@ -17,7 +17,10 @@ import {
 export function CharactersView() {
   const { characters } = useApp();
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedCharacter, setSelectedCharacter] = useState<Character | null>(null);
+  const [selectedCharacter, setSelectedCharacter] = useState<Character | null>(() => {
+    const characterId = typeof window === 'undefined' ? '' : window.location.hash.replace(/^#characters\/?/, '').split('/')[0];
+    return characters.find((character) => character.id === characterId) ?? null;
+  });
   const [isSpeakingId, setIsSpeakingId] = useState<string | null>(null);
   const [filterPlatform, setFilterPlatform] = useState<string>('all');
 

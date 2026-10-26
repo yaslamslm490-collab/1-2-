@@ -16,7 +16,6 @@ export function SecurityView() {
     currentUser,
     switchRole,
     integrations,
-    pingIntegration,
     exportStateToJson,
     importStateFromJson,
     resetToBlueprintDefaults,
@@ -165,7 +164,7 @@ export function SecurityView() {
               تكاملات الخدمات الخارجية وموصلات API (Connectors Health)
             </h3>
           </div>
-          <span className="text-xs text-muted">فحص التوصيل والاعتماديات</span>
+          <a href="#integrations" className="text-xs text-accent hover:underline">الحالة الحقيقية والاختبار في مركز التكاملات</a>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -193,13 +192,8 @@ export function SecurityView() {
               </div>
 
               <div className="pt-2 border-t border-default/50 flex items-center justify-between text-xs">
-                <span className="text-muted">استجابة: {int.latency}</span>
-                <button
-                  onClick={() => pingIntegration(int.id)}
-                  className="text-xs text-accent hover:underline font-bold"
-                >
-                  فحص الاتصال (Ping)
-                </button>
+                <span className="text-muted">آخر فحص: {int.lastPing}</span>
+                <a href="#integrations" className="text-xs text-accent hover:underline font-bold">إدارة وفحص آمن</a>
               </div>
             </div>
           ))}

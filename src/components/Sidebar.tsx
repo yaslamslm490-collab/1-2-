@@ -18,6 +18,7 @@ import {
   CheckCheck,
   FileText,
   X,
+  KeyRound,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -49,6 +50,7 @@ export function Sidebar({ activeView, onNavigate, isOpen, onClose }: SidebarProp
         { key: 'owner_center', label: 'مركز المالك', icon: Crown },
         { key: 'dashboard', label: 'لوحة التحكم العامة', icon: LayoutDashboard },
         { key: 'assistant', label: 'المساعد الشخصي NADA', icon: Bot },
+        { key: 'integrations', label: 'مركز ربط المفاتيح', icon: KeyRound },
         {
           key: 'approvals',
           label: 'مركز الموافقات',

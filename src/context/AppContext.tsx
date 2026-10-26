@@ -164,7 +164,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (parsed.memoryEntries) setMemoryEntries(parsed.memoryEntries);
         if (parsed.sandboxExperiments) setSandboxExperiments(parsed.sandboxExperiments);
         if (parsed.readinessItems) setReadinessItems(parsed.readinessItems);
-        if (parsed.integrations) setIntegrations(parsed.integrations);
+        if (parsed.integrations) {
+          setIntegrations((parsed.integrations as IntegrationConnector[]).map((integration) => ({
+            ...integration,
+            status: 'needs_keys',
+            latency: 'غير مختبر',
+            lastPing: integration.category === 'audio'
+              ? 'قدرات المتصفح لم تُختبر على جهاز المالك'
+              : 'لا يوجد اختبار خادمي مؤكد',
+            hasApiSecret: false,
+          })));
+        }
         if (parsed.agents) setAgents(parsed.agents);
         if (parsed.routes) setRoutes(parsed.routes);
         if (parsed.scripts) setScripts(parsed.scripts);
@@ -474,14 +484,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           if (i.id === intId) {
             return {
               ...i,
-              lastPing: 'منذ ثوانٍ (متصل بنجاح)',
-              status: 'connected',
+              lastPing: 'لم يُنفّذ فحص حقيقي؛ استخدم مركز التكاملات',
+              status: 'needs_keys',
+              latency: 'غير مختبر',
+              hasApiSecret: false,
             };
           }
           return i;
         })
       );
-      logAction(`فحص اتصال الخدمة الخارجية: ${intId}`, 'Integrations', 'info');
+      logAction(`تم تسجيل الحاجة إلى فحص حقيقي للخدمة: ${intId}`, 'Integrations', 'warn');
     },
     [logAction]
   );

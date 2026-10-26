@@ -7,8 +7,10 @@
     "dev": "vite --host 0.0.0.0 --port 3000",
     "build": "vite build",
     "lint": "eslint .",
+    "test:api": "node --experimental-strip-types --test tests/api-providers.test.mjs",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.app.json",
+    "typecheck:vercel": "tsc --noEmit -p tsconfig.vercel.json",
     "typecheck:worker": "tsc --noEmit -p tsconfig.worker.json",
     "cloudflare:dev": "npm run build && wrangler dev --local --ip 0.0.0.0 --port 8787",
     "cloudflare:dry-run": "wrangler deploy --dry-run"

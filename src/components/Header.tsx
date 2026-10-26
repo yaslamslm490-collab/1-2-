@@ -23,6 +23,7 @@ const VIEW_TITLES: Record<ViewKey, string> = {
   dashboard: 'لوحة التحكم العامة ومراقب الوكلاء',
   assistant: 'المساعد الشخصي NADA AI',
   characters: 'استوديو الشخصيات الافتراضية والـ Bible',
+  integrations: 'NADA Control Center — Integrations & API Keys',
   universes: 'العوالم القصصية والسلاسل الزمنية',
   projects: 'إدارة المشروعات والميزانيات',
   content_pipeline: 'مسار الإنتاج وبوابة الجودة (Quality Gate)',

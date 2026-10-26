@@ -11,6 +11,7 @@ export type ViewKey =
   | 'dashboard'
   | 'assistant'
   | 'characters'
+  | 'integrations'
   | 'universes'
   | 'projects'
   | 'content_pipeline'
